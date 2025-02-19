@@ -60,11 +60,11 @@ map.on('load', () => {
     d3.json('https://dsc106.com/labs/lab07/data/bluebikes-stations.json').then(jsonData => {
         stations = jsonData.data.stations;
 
-        circles = svg.selectAll('circle')
-            .data(stations)
-            .enter()
-            .append('circle')
-            .attr('r', 4)
+        circles = svg
+            .selectAll('circle')
+            .data(stations, d => d.short_name)
+            .join('circle')
+            .attr('r', 0)
             .attr('fill', 'orangered')
             .attr('stroke', 'white')
             .attr('stroke-width', 1)
@@ -73,6 +73,58 @@ map.on('load', () => {
         updatePositions();
     }).catch(error => {
         console.error('Error loading JSON:', error);
+    });
+
+    let trips;
+    let departures;
+    let arrivals;
+
+    d3.csv('https://dsc106.com/labs/lab07/data/bluebikes-traffic-2024-03.csv').then(csvData => {
+        trips = csvData;
+
+        departures = d3.rollup(
+            trips,
+            (v) => v.length,
+            (d) => d.start_station_id,
+        );
+
+        arrivals = d3.rollup(
+            trips,
+            v => v.length,
+            d => d.end_station_id
+        );
+
+        stations = stations.map(station => {
+            let id = station.short_name;
+            station.arrivals = arrivals.get(id) ?? 0;
+            station.departures = departures.get(id) ?? 0;
+            station.totalTraffic = station.arrivals + station.departures;
+            return station;
+        });
+
+        const radiusScale = d3
+            .scaleSqrt()
+            .domain([0, d3.max(stations, (d) => d.totalTraffic)])
+            .range([0, 20]);
+
+        circles = svg
+            .selectAll('circle')
+            .data(stations, d => d.short_name)
+            .join('circle')
+            .attr('fill', 'orangered')
+            .attr('stroke', 'white')
+            .attr('stroke-width', 1)
+            .attr('opacity', 0.8)
+            .attr('r', d => radiusScale(d.totalTraffic))
+
+        circles.selectAll('title').remove();
+
+        circles.append('title')
+            .text(d => `${d.totalTraffic} trips (${d.departures} departures, ${d.arrivals} arrivals)`);
+
+        updatePositions();
+    }).catch(error => {
+        console.error('Error loading CSV:', error);
     });
 
     map.on('move', updatePositions);
