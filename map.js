@@ -79,6 +79,33 @@ map.on('load', () => {
     let departures;
     let arrivals;
 
+    let timeFilter = -1;
+    const timeSlider = document.getElementById('time-slider');
+    const selectedTime = document.getElementById('selected-time');
+    const anyTimeLabel = document.getElementById('any-time');
+
+    timeSlider.addEventListener('input', updateTimeDisplay);
+    updateTimeDisplay();
+
+    function formatTime(minutes) {
+        const date = new Date(0, 0, 0, 0, minutes);
+        return date.toLocaleString('en-US', { timeStyle: 'short' });
+    }
+
+    function updateTimeDisplay() {
+        timeFilter = Number(timeSlider.value);
+
+        if (timeFilter === -1) {
+            selectedTime.textContent = '';
+            anyTimeLabel.style.display = 'block';
+        } else {
+            selectedTime.textContent = formatTime(timeFilter);
+            anyTimeLabel.style.display = 'none';
+        }
+
+        // Trigger filtering logic which will be implemented in the next step
+    }
+
     d3.csv('https://dsc106.com/labs/lab07/data/bluebikes-traffic-2024-03.csv').then(csvData => {
         trips = csvData;
 

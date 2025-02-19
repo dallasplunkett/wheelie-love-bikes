@@ -40,7 +40,7 @@ header label {
     margin-left: auto;
 }
 
-input[type=range] {
+#time-slider {
     width: 320px;
 }
 
@@ -49,11 +49,11 @@ em {
     margin-left: auto;
 }
 
-time {
+#selected-time {
     font-weight: bold;
 }
 
-em {
+#any-time {
     font-weight: lighter;
     color: gray;
 }
