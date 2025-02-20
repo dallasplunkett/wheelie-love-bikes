@@ -1,3 +1,6 @@
+let departuresByMinute = Array.from({ length: 1440 }, () => []);
+let arrivalsByMinute = Array.from({ length: 1440 }, () => []);
+
 mapboxgl.accessToken = 'pk.eyJ1IjoiZGFsbGFzcGx1bmtldHQiLCJhIjoiY203Yzk1aXc2MDF5eTJ0b2tyb2hkeDY3ZiJ9.GUfDb4KmwC9Z7l1aLeJhgQ';
 
 const map = new mapboxgl.Map({
@@ -68,6 +71,12 @@ map.on('load', () => {
             for (let trip of trips) {
                 trip.started_at = new Date(trip.started_at);
                 trip.ended_at = new Date(trip.ended_at);
+
+                let startedMinutes = minutesSinceMidnight(trip.started_at);
+                departuresByMinute[startedMinutes].push(trip);
+
+                let endedMinutes = minutesSinceMidnight(trip.ended_at);
+                arrivalsByMinute[endedMinutes].push(trip);
             }
 
             departures = d3.rollup(
@@ -122,41 +131,26 @@ map.on('load', () => {
 
     function filterTripsByTime(timeVal) {
         if (timeVal === -1) {
-            // No filter selected, so return everything
             return {
-                filteredTrips: trips,
                 filteredArrivals: arrivals,
                 filteredDepartures: departures,
                 filteredStations: stations
             };
         }
 
-        // Filter trips to only those that start OR end within ±60 minutes
-        const filteredTrips = trips.filter((t) => {
-            const startedMinutes = minutesSinceMidnight(t.started_at);
-            const endedMinutes = minutesSinceMidnight(t.ended_at);
-            return (
-                Math.abs(startedMinutes - timeVal) <= 60 ||
-                Math.abs(endedMinutes - timeVal) <= 60
-            );
-        });
-
-        // Recompute rollups for the filtered set
         const filteredDepartures = d3.rollup(
-            filteredTrips,
+            filterByMinute(departuresByMinute, timeFilter),
             (v) => v.length,
             (d) => d.start_station_id
         );
 
         const filteredArrivals = d3.rollup(
-            filteredTrips,
+            filterByMinute(arrivalsByMinute, timeFilter),
             (v) => v.length,
             (d) => d.end_station_id
         );
 
-        // Create a new array of stations with updated arrivals, departures, totalTraffic
         const filteredStations = stations.map(station => {
-            // clone station to avoid mutating the original
             let newStation = { ...station };
             let id = newStation.short_name;
 
@@ -167,21 +161,32 @@ map.on('load', () => {
         });
 
         return {
-            filteredTrips,
             filteredArrivals,
             filteredDepartures,
             filteredStations
         };
     }
 
+    function filterByMinute(tripsByMinute, minute) {
+
+        let minMinute = (minute - 60 + 1440) % 1440;
+        let maxMinute = (minute + 60) % 1440;
+
+        if (minMinute > maxMinute) {
+            let beforeMidnight = tripsByMinute.slice(minMinute);
+            let afterMidnight = tripsByMinute.slice(0, maxMinute);
+            return beforeMidnight.concat(afterMidnight).flat();
+        } else {
+            return tripsByMinute.slice(minMinute, maxMinute).flat();
+        }
+    }
+
     function updateCircles(stationData) {
 
-        // Conditionally scale the radius if timeFilter is on or not
         const radiusScale = d3.scaleSqrt()
             .domain([0, d3.max(stationData, (d) => d.totalTraffic)])
             .range(timeFilter === -1 ? [0, 20] : [3, 30]);
 
-        // Join the data
         circles = svg
             .selectAll('circle')
             .data(stationData, d => d.short_name)
@@ -192,14 +197,12 @@ map.on('load', () => {
             .attr('opacity', 0.8)
             .attr('r', d => radiusScale(d.totalTraffic));
 
-        // Update the tooltip
         circles.selectAll('title').remove();
         circles.append('title')
             .text(d =>
                 `${d.totalTraffic} trips (${d.departures} departures, ${d.arrivals} arrivals)`
             );
 
-        // After updating the data, reposition circles on the map
         updatePositions();
     }
 
@@ -214,15 +217,12 @@ map.on('load', () => {
             anyTimeLabel.style.display = 'none';
         }
 
-        // Now do the actual filtering
         const {
-            filteredTrips,
             filteredArrivals,
             filteredDepartures,
             filteredStations
         } = filterTripsByTime(timeFilter);
 
-        // Redraw the circles with the filtered station data
         updateCircles(filteredStations);
     }
 });
