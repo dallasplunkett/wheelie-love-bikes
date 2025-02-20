@@ -18,7 +18,7 @@ function minutesSinceMidnight(date) {
 
 map.on('load', () => {
     const route_style = {
-        'line-color': 'steelblue',
+        'line-color': 'green',
         'line-width': 2,
         'line-opacity': 0.6
     };
@@ -190,7 +190,7 @@ map.on('load', () => {
 
         const radiusScale = d3.scaleSqrt()
             .domain([0, d3.max(stationData, (d) => d.totalTraffic)])
-            .range(timeFilter === -1 ? [0, 20] : [4, 24]);
+            .range([0, 20]);
 
         circles = svg
             .selectAll('circle')
@@ -201,7 +201,7 @@ map.on('load', () => {
             .attr('stroke-width', 1)
             .attr('opacity', 0.8)
             .attr('r', d => radiusScale(d.totalTraffic))
-            .style("--departure-ratio", d => stationFlow(d.departures / d.totalTraffic));
+            .style("--departure-ratio", d => (d.totalTraffic === 0) ? 0.5 : stationFlow(d.departures / d.totalTraffic));
 
         circles.selectAll('title').remove();
         circles.append('title')
