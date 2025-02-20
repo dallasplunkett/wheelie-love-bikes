@@ -9,12 +9,16 @@ const map = new mapboxgl.Map({
     maxZoom: 18
 });
 
+function minutesSinceMidnight(date) {
+    return date.getHours() * 60 + date.getMinutes();
+}
+
 map.on('load', () => {
     const route_style = {
         'line-color': 'steelblue',
         'line-width': 2,
         'line-opacity': 0.6
-    }
+    };
 
     map.addSource('boston_route', {
         type: 'geojson',
@@ -41,9 +45,63 @@ map.on('load', () => {
     });
 
     const svg = d3.select('#map').select('svg');
-
     let stations = [];
     let circles;
+    let trips = [];
+    let departures;
+    let arrivals;
+
+    let timeFilter = -1;
+    const timeSlider = document.getElementById('time-slider');
+    const selectedTime = document.getElementById('selected-time');
+    const anyTimeLabel = document.getElementById('any-time');
+
+    timeSlider.addEventListener('input', updateTimeDisplay);
+    updateTimeDisplay();
+
+    d3.json('https://dsc106.com/labs/lab07/data/bluebikes-stations.json').then(jsonData => {
+        stations = jsonData.data.stations;
+
+        d3.csv('https://dsc106.com/labs/lab07/data/bluebikes-traffic-2024-03.csv').then(csvData => {
+            trips = csvData;
+
+            for (let trip of trips) {
+                trip.started_at = new Date(trip.started_at);
+                trip.ended_at = new Date(trip.ended_at);
+            }
+
+            departures = d3.rollup(
+                trips,
+                (v) => v.length,
+                (d) => d.start_station_id,
+            );
+
+            arrivals = d3.rollup(
+                trips,
+                v => v.length,
+                d => d.end_station_id
+            );
+
+            stations = stations.map(station => {
+                let id = station.short_name;
+                station.arrivals = arrivals.get(id) ?? 0;
+                station.departures = departures.get(id) ?? 0;
+                station.totalTraffic = station.arrivals + station.departures;
+                return station;
+            });
+
+            updateCircles(stations);
+        }).catch(error => {
+            console.error('Error loading CSV:', error);
+        });
+    }).catch(error => {
+        console.error('Error loading JSON:', error);
+    });
+
+    map.on('move', updatePositions);
+    map.on('zoom', updatePositions);
+    map.on('resize', updatePositions);
+    map.on('moveend', updatePositions);
 
     function getCoords(station) {
         const point = new mapboxgl.LngLat(+station.lon, +station.lat);
@@ -57,39 +115,92 @@ map.on('load', () => {
             .attr('cy', d => getCoords(d).cy);
     }
 
-    d3.json('https://dsc106.com/labs/lab07/data/bluebikes-stations.json').then(jsonData => {
-        stations = jsonData.data.stations;
-
-        circles = svg
-            .selectAll('circle')
-            .data(stations, d => d.short_name)
-            .join('circle')
-            .attr('r', 0)
-            .attr('fill', 'orangered')
-            .attr('stroke', 'white')
-            .attr('stroke-width', 1)
-            .attr('opacity', 0.8);
-
-        updatePositions();
-    }).catch(error => {
-        console.error('Error loading JSON:', error);
-    });
-
-    let trips;
-    let departures;
-    let arrivals;
-
-    let timeFilter = -1;
-    const timeSlider = document.getElementById('time-slider');
-    const selectedTime = document.getElementById('selected-time');
-    const anyTimeLabel = document.getElementById('any-time');
-
-    timeSlider.addEventListener('input', updateTimeDisplay);
-    updateTimeDisplay();
-
     function formatTime(minutes) {
         const date = new Date(0, 0, 0, 0, minutes);
         return date.toLocaleString('en-US', { timeStyle: 'short' });
+    }
+
+    function filterTripsByTime(timeVal) {
+        if (timeVal === -1) {
+            // No filter selected, so return everything
+            return {
+                filteredTrips: trips,
+                filteredArrivals: arrivals,
+                filteredDepartures: departures,
+                filteredStations: stations
+            };
+        }
+
+        // Filter trips to only those that start OR end within ±60 minutes
+        const filteredTrips = trips.filter((t) => {
+            const startedMinutes = minutesSinceMidnight(t.started_at);
+            const endedMinutes = minutesSinceMidnight(t.ended_at);
+            return (
+                Math.abs(startedMinutes - timeVal) <= 60 ||
+                Math.abs(endedMinutes - timeVal) <= 60
+            );
+        });
+
+        // Recompute rollups for the filtered set
+        const filteredDepartures = d3.rollup(
+            filteredTrips,
+            (v) => v.length,
+            (d) => d.start_station_id
+        );
+
+        const filteredArrivals = d3.rollup(
+            filteredTrips,
+            (v) => v.length,
+            (d) => d.end_station_id
+        );
+
+        // Create a new array of stations with updated arrivals, departures, totalTraffic
+        const filteredStations = stations.map(station => {
+            // clone station to avoid mutating the original
+            let newStation = { ...station };
+            let id = newStation.short_name;
+
+            newStation.arrivals = filteredArrivals.get(id) ?? 0;
+            newStation.departures = filteredDepartures.get(id) ?? 0;
+            newStation.totalTraffic = newStation.arrivals + newStation.departures;
+            return newStation;
+        });
+
+        return {
+            filteredTrips,
+            filteredArrivals,
+            filteredDepartures,
+            filteredStations
+        };
+    }
+
+    function updateCircles(stationData) {
+
+        // Conditionally scale the radius if timeFilter is on or not
+        const radiusScale = d3.scaleSqrt()
+            .domain([0, d3.max(stationData, (d) => d.totalTraffic)])
+            .range(timeFilter === -1 ? [0, 20] : [3, 30]);
+
+        // Join the data
+        circles = svg
+            .selectAll('circle')
+            .data(stationData, d => d.short_name)
+            .join('circle')
+            .attr('fill', 'orangered')
+            .attr('stroke', 'white')
+            .attr('stroke-width', 1)
+            .attr('opacity', 0.8)
+            .attr('r', d => radiusScale(d.totalTraffic));
+
+        // Update the tooltip
+        circles.selectAll('title').remove();
+        circles.append('title')
+            .text(d =>
+                `${d.totalTraffic} trips (${d.departures} departures, ${d.arrivals} arrivals)`
+            );
+
+        // After updating the data, reposition circles on the map
+        updatePositions();
     }
 
     function updateTimeDisplay() {
@@ -103,59 +214,15 @@ map.on('load', () => {
             anyTimeLabel.style.display = 'none';
         }
 
-        // Trigger filtering logic which will be implemented in the next step
+        // Now do the actual filtering
+        const {
+            filteredTrips,
+            filteredArrivals,
+            filteredDepartures,
+            filteredStations
+        } = filterTripsByTime(timeFilter);
+
+        // Redraw the circles with the filtered station data
+        updateCircles(filteredStations);
     }
-
-    d3.csv('https://dsc106.com/labs/lab07/data/bluebikes-traffic-2024-03.csv').then(csvData => {
-        trips = csvData;
-
-        departures = d3.rollup(
-            trips,
-            (v) => v.length,
-            (d) => d.start_station_id,
-        );
-
-        arrivals = d3.rollup(
-            trips,
-            v => v.length,
-            d => d.end_station_id
-        );
-
-        stations = stations.map(station => {
-            let id = station.short_name;
-            station.arrivals = arrivals.get(id) ?? 0;
-            station.departures = departures.get(id) ?? 0;
-            station.totalTraffic = station.arrivals + station.departures;
-            return station;
-        });
-
-        const radiusScale = d3
-            .scaleSqrt()
-            .domain([0, d3.max(stations, (d) => d.totalTraffic)])
-            .range([0, 20]);
-
-        circles = svg
-            .selectAll('circle')
-            .data(stations, d => d.short_name)
-            .join('circle')
-            .attr('fill', 'orangered')
-            .attr('stroke', 'white')
-            .attr('stroke-width', 1)
-            .attr('opacity', 0.8)
-            .attr('r', d => radiusScale(d.totalTraffic))
-
-        circles.selectAll('title').remove();
-
-        circles.append('title')
-            .text(d => `${d.totalTraffic} trips (${d.departures} departures, ${d.arrivals} arrivals)`);
-
-        updatePositions();
-    }).catch(error => {
-        console.error('Error loading CSV:', error);
-    });
-
-    map.on('move', updatePositions);
-    map.on('zoom', updatePositions);
-    map.on('resize', updatePositions);
-    map.on('moveend', updatePositions);
 });
