@@ -183,9 +183,14 @@ map.on('load', () => {
 
     function updateCircles(stationData) {
 
+        let stationFlow = d3
+            .scaleQuantize()
+            .domain([0, 1])
+            .range([0, 0.5, 1]);
+
         const radiusScale = d3.scaleSqrt()
             .domain([0, d3.max(stationData, (d) => d.totalTraffic)])
-            .range(timeFilter === -1 ? [0, 20] : [3, 30]);
+            .range(timeFilter === -1 ? [0, 20] : [4, 24]);
 
         circles = svg
             .selectAll('circle')
@@ -195,7 +200,8 @@ map.on('load', () => {
             .attr('stroke', 'white')
             .attr('stroke-width', 1)
             .attr('opacity', 0.8)
-            .attr('r', d => radiusScale(d.totalTraffic));
+            .attr('r', d => radiusScale(d.totalTraffic))
+            .style("--departure-ratio", d => stationFlow(d.departures / d.totalTraffic));
 
         circles.selectAll('title').remove();
         circles.append('title')
